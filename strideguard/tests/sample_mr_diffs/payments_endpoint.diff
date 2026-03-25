@@ -1,0 +1,77 @@
+diff --git a/api/payments.py b/api/payments.py
+new file mode 100644
+index 0000000..4a2f3d1
+--- /dev/null
++++ b/api/payments.py
+@@ -0,0 +1,68 @@
++from flask import Flask, request, redirect, jsonify
++import logging
++import sqlite3
++
++app = Flask(__name__)
++logger = logging.getLogger(__name__)
++
++# TODO: move this to env — STRIDE-I-1: hardcoded payment secret in source
++# (actual key value removed for security scanning compliance — the vulnerability
++# being demonstrated is having ANY secret hardcoded in source, not this specific value)
++STRIPE_SECRET_KEY = "payment_secret_hardcoded_in_source_see_stride_i_1"
++
++@app.route('/api/payments/initiate', methods=['POST'])
++def initiate_payment():
++    """Initiate a payment and redirect to confirmation page."""
++    # STRIDE-S-1: no authentication check before processing payment
++    user_id = request.form.get('user_id')
++    amount = request.form.get('amount')
++    redirect_url = request.form.get('redirect_url')
++    order_id = request.form.get('order_id')
++
++    # STRIDE-T-1: order_id is user-controlled and interpolated into SQL via f-string
++    conn = sqlite3.connect('payments.db')
++    cursor = conn.cursor()
++    query = f"SELECT * FROM orders WHERE id = '{order_id}'"
++    cursor.execute(query)
++    order = cursor.fetchone()
++
++    if not order:
++        return jsonify({'error': 'Order not found'}), 404
++
++    # STRIDE-I-2: redirect_url (user-controlled) written to logs unvalidated
++    logger.info(f"Payment initiated: user={user_id} amount={amount} order={order_id} redirect={redirect_url}")
++
++    # Process payment
++    import stripe
++    stripe.api_key = STRIPE_SECRET_KEY
++    charge = stripe.Charge.create(
++        amount=int(amount) * 100,
++        currency="usd",
++        source=request.form.get('stripe_token'),
++        description=f"Order {order_id}"
++    )
++
++    # STRIDE-R-1: audit log entry is missing user_id — no way to tie action to actor
++    cursor.execute(
++        "INSERT INTO audit_log (action, order_id, timestamp) VALUES (?, ?, datetime('now'))",
++        ('payment_initiated', order_id)
++    )
++    conn.commit()
++
++    return redirect(redirect_url)
++
++
++@app.route('/api/payments/history', methods=['GET'])
++def payment_history():
++    """Return payment history for any order."""
++    # STRIDE-E-1: no auth check — any caller can read any order's payment history (IDOR)
++    order_id = request.args.get('order_id')
++
++    conn = sqlite3.connect('payments.db')
++    cursor = conn.cursor()
++    cursor.execute("SELECT * FROM payments WHERE order_id = ?", (order_id,))
++    payments = cursor.fetchall()
++
++    # STRIDE-I-3: internal db path and key prefix returned in response body
++    return jsonify({
++        'payments': payments,
++        'db_path': conn.database,
++        'stripe_key_prefix': STRIPE_SECRET_KEY[:8]
++    })

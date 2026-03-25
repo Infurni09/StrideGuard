@@ -1,0 +1,49 @@
+name: strideguard
+description: >
+  StrideGuard is an AI-powered threat modeling agent that analyzes merge request
+  diffs and GitLab epics/issues using the STRIDE methodology. It automatically
+  creates structured security issues for each identified threat and posts a
+  summary comment on the MR. On subsequent MR updates, it re-analyzes the diff
+  and closes resolved threats automatically.
+
+triggers:
+  - type: merge_request
+    events:
+      - opened
+      - updated
+  - type: label
+    name: needs-threat-model
+    resources:
+      - issue
+      - epic
+
+context:
+  - type: merge_request_diff
+  - type: repository_files
+    include:
+      - "**/*.py"
+      - "**/*.go"
+      - "**/*.js"
+      - "**/*.ts"
+      - "**/*.rb"
+      - "**/*.java"
+      - "**/*.cs"
+      - "Dockerfile"
+      - "docker-compose*.yml"
+      - "**/permissions.yaml"
+      - "**/rbac.yaml"
+      - "**/policy.yaml"
+      - "**/*auth*.yaml"
+      - "**/*auth*.json"
+  - type: issue_description
+  - type: epic_description
+
+tools:
+  - gitlab:create_issue
+  - gitlab:update_issue
+  - gitlab:close_issue
+  - gitlab:create_note
+  - gitlab:update_note
+  - gitlab:list_issues
+
+instructions: prompts/stride_analysis.md
